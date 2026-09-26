@@ -235,14 +235,13 @@ To understand the implementation, start with `project.py`, then read `translatio
 
 Future directions include visual translation editing and review, a main agent coordinating translation models or subagents, terminology and corpus retrieval, and additional adapters based on real games.
 
-The project uses AI-assisted development. Its design and the maintainer's understanding of the code continue to evolve.
+
 
 ## License and Third-Party Sources
 
 This project uses the [MIT License](LICENSE).
 
-The Ruby Marshal parser and writer are based on `plugins/rm_marshal.py` from [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL). The local file is `game_translation/formats/marshal.py`, and the [upstream MIT license text](game_translation/formats/RPGMTL-LICENSE.txt) is retained. This file includes adaptations and fixes made for this project; it is not an unchanged upstream copy. The exact upstream commit was not recorded when it was originally imported, and no verified source revision is claimed.
+The Ruby Marshal parser and writer are based on `plugins/rm_marshal.py` from [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL). The local file is `game_translation/formats/marshal.py`, and the [upstream MIT license text](game_translation/formats/RPGMTL-LICENSE.txt) is retained. 
 
 [UnityPy](https://github.com/K0lb3/UnityPy) is an external dependency installed as needed; its source is not bundled here. Its license and dependency notices are provided with that package. [XUnity.AutoTranslator](https://github.com/bbepis/XUnity.AutoTranslator) and [BepInEx](https://github.com/BepInEx/BepInEx), referenced for font configuration, are also not distributed with this project.
 
-`tests/fixtures/` contains synthetic samples created for this project. User-supplied games, fonts, and other resources retain their respective rights and licenses; using this project does not place those assets under the MIT License.
