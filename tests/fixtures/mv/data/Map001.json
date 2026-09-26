@@ -1,0 +1,58 @@
+{
+  "displayName": "Forest Entrance",
+  "events": [
+    null,
+    {
+      "id": 1,
+      "pages": [
+        {
+          "list": [
+            {
+              "code": 101,
+              "parameters": [
+                "",
+                0,
+                0,
+                2,
+                "Alice"
+              ]
+            },
+            {
+              "code": 401,
+              "parameters": [
+                "\\C[2]Hello, traveler!\\C[0]\\!"
+              ]
+            },
+            {
+              "code": 102,
+              "parameters": [
+                [
+                  "Enter the forest",
+                  "Go back"
+                ],
+                0
+              ]
+            },
+            {
+              "code": 402,
+              "parameters": [
+                0,
+                "Enter the forest"
+              ]
+            },
+            {
+              "code": 401,
+              "parameters": [
+                "Stay close to me."
+              ]
+            },
+            {
+              "code": 0,
+              "parameters": []
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
