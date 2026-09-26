@@ -247,5 +247,3 @@ tests/                    自编样例和最小回归验证
 Ruby Marshal 解析与写回代码基于 [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL) 的 `plugins/rm_marshal.py`，本地文件为 `game_translation/formats/marshal.py`，保留 [上游 MIT 许可文本](game_translation/formats/RPGMTL-LICENSE.txt)。
 
 [UnityPy](https://github.com/K0lb3/UnityPy) 是按需安装的外部依赖，未将其源码打包进本项目；其许可与依赖说明随该软件包提供。字体配置中涉及的 [XUnity.AutoTranslator](https://github.com/bbepis/XUnity.AutoTranslator) 和 [BepInEx](https://github.com/BepInEx/BepInEx) 也未随项目分发。
-
-`tests/fixtures/` 是自编样例。用户提供的游戏、字体和其他资源保留各自的权利与许可，不因使用本项目而转为 MIT 许可。
