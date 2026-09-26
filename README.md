@@ -239,13 +239,12 @@ tests/                    自编样例和最小回归验证
 
 后续方向包括译文可视化与审核、由主 Agent 协调不同翻译模型或子代理、术语和语料检索，以及针对真实游戏补充适配。
 
-项目采用了 AI 辅助开发，项目设计和代码理解也在持续迭代。
 
 ## 许可证与第三方来源
 
 本项目使用 [MIT License](LICENSE)。
 
-Ruby Marshal 解析与写回代码基于 [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL) 的 `plugins/rm_marshal.py`，本地文件为 `game_translation/formats/marshal.py`，保留 [上游 MIT 许可文本](game_translation/formats/RPGMTL-LICENSE.txt)。该文件包含本项目的适配与修复，不是未经修改的上游副本；早期引入时没有记录准确的上游提交版本，当前不声称已核实该版本。
+Ruby Marshal 解析与写回代码基于 [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL) 的 `plugins/rm_marshal.py`，本地文件为 `game_translation/formats/marshal.py`，保留 [上游 MIT 许可文本](game_translation/formats/RPGMTL-LICENSE.txt)。
 
 [UnityPy](https://github.com/K0lb3/UnityPy) 是按需安装的外部依赖，未将其源码打包进本项目；其许可与依赖说明随该软件包提供。字体配置中涉及的 [XUnity.AutoTranslator](https://github.com/bbepis/XUnity.AutoTranslator) 和 [BepInEx](https://github.com/BepInEx/BepInEx) 也未随项目分发。
 
