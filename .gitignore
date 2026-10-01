@@ -14,11 +14,39 @@ __pycache__/
 /work/
 /output/
 /translated/
+.game-translation-build-*/
 /packages/
 /.local*/
+/archive/
+
+# Local collaboration instructions and desktop development
+/AGENTS.md
+/desktop/
 
 # Local tool and OS caches
 .ruff_cache/
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Local real-game validation data
+/test/
+/tests/
+
+# Optional locally built Mono helper and downloaded dependencies
+/tools/unity_mono/bin/
+/tools/unity_mono/deps/
+
+# Optional Addressables helper builds and dependencies
+/tools/unity_addressables/bin/
+/tools/unity_addressables/obj/
+/tools/unity_addressables/deps/
+
+# Optional WOLF tools, downloaded separately
+/tools/wolf/bin/
+
+# Optional Ren'Py tool checkouts, downloaded separately
+/tools/renpy/vendor/
+
+# Optional GDRETools distribution, downloaded separately
+/tools/godot/bin/

@@ -322,7 +322,7 @@ class ME:
 
 PATH_RE = re.compile(r"\.([^.\[]+)|\[(\d+)\]")
 
-def _me_str(me):
+def string_value(me):
     if me is None: return None
     me = me.at()
     if me.token != b'"':
@@ -376,10 +376,10 @@ def _extract_commands(me_list, prefix, file_name, entries):
         val = params.data[pidx]
         if code == 102 and val.token == b"[":
             for ci, ch in enumerate(val.data):
-                s = _me_str(ch)
+                s = string_value(ch)
                 _emit(entries, file_name, f"{prefix}[{li}].@parameters[{pidx}][{ci}]", code, "choice", s)
         else:
-            s = _me_str(val)
+            s = string_value(val)
             _emit(entries, file_name, f"{prefix}[{li}].@parameters[{pidx}]", code, etype, s)
 
 def _extract_walk_fields(me, path, file_name, entries, depth=0):
@@ -390,13 +390,13 @@ def _extract_walk_fields(me, path, file_name, entries, depth=0):
         for ivar, ftype in VX_CLASS_FIELDS[cls]:
             val = me.get(ivar.encode())
             if ftype == "str":
-                _emit(entries, file_name, f"{path}.{ivar}", None, "field", _me_str(val))
+                _emit(entries, file_name, f"{path}.{ivar}", None, "field", string_value(val))
             elif ftype == "strlist" and val is not None and val.token == b"[":
                 for i, item in enumerate(val.data):
-                    _emit(entries, file_name, f"{path}.{ivar}[{i}]", None, "field", _me_str(item))
+                    _emit(entries, file_name, f"{path}.{ivar}[{i}]", None, "field", string_value(item))
             elif ftype == "dictlist" and val is not None and val.token == b"{":
                 for k, v in val:
-                    _emit(entries, file_name, f"{path}.{ivar}.{k.decode('utf-8')}", None, "field", _me_str(v))
+                    _emit(entries, file_name, f"{path}.{ivar}.{k.decode('utf-8')}", None, "field", string_value(v))
     if me.token == b"o":
         table = me.data[1]
         for k, v in table:
@@ -426,18 +426,18 @@ def extract_vx(file_name, content):
                     cmds = page.get(b"@list")
                     if cmds is not None and cmds.token == b"[":
                         _extract_commands(cmds, f"$.@events[{k}].@pages[{pi}].@list", file_name, entries)
-        disp = _me_str(root.get(b"@display_name"))
+        disp = string_value(root.get(b"@display_name"))
         _emit(entries, file_name, "$.@display_name", None, "field", disp)
         return entries
 
     if base == "system":
         for ivar in VX_SYSTEM_SINGLES:
-            _emit(entries, file_name, f"$.{ivar}", None, "field", _me_str(root.get(ivar.encode())))
+            _emit(entries, file_name, f"$.{ivar}", None, "field", string_value(root.get(ivar.encode())))
         for ivar in VX_SYSTEM_LISTS:
             val = root.get(ivar.encode())
             if val is not None and val.token == b"[":
                 for i, item in enumerate(val.data):
-                    _emit(entries, file_name, f"$.{ivar}[{i}]", None, "field", _me_str(item))
+                    _emit(entries, file_name, f"$.{ivar}[{i}]", None, "field", string_value(item))
         terms = root.get(b"@terms")
         if terms is not None:
             for ivar, ftype in VX_TERMS_FIELDS:
@@ -445,10 +445,10 @@ def extract_vx(file_name, content):
                 if val is None: continue
                 if ftype == "strlist" and val.token == b"[":
                     for i, item in enumerate(val.data):
-                        _emit(entries, file_name, f"$.@terms.{ivar}[{i}]", None, "field", _me_str(item))
+                        _emit(entries, file_name, f"$.@terms.{ivar}[{i}]", None, "field", string_value(item))
                 elif ftype == "dictlist" and val.token == b"{":
                     for k, v in val:
-                        _emit(entries, file_name, f"$.@terms.{ivar}.{k.decode('utf-8')}", None, "field", _me_str(v))
+                        _emit(entries, file_name, f"$.@terms.{ivar}.{k.decode('utf-8')}", None, "field", string_value(v))
         return entries
 
     if base == "commonevents":
@@ -460,7 +460,7 @@ def extract_vx(file_name, content):
 
     if base == "troops":
         for ti, tr in enumerate(root.data):
-            _emit(entries, file_name, f"$[{ti}].@name", None, "field", _me_str(tr.get(b"@name")))
+            _emit(entries, file_name, f"$[{ti}].@name", None, "field", string_value(tr.get(b"@name")))
             pages = tr.get(b"@pages")
             if pages is not None:
                 for pi, page in enumerate(pages.data):
@@ -477,7 +477,7 @@ def extract_vx(file_name, content):
         _extract_walk_fields(root, "$", file_name, entries)
     return entries
 
-def _resolve_path(root, path):
+def resolve_path(root, path):
     node = root
     segs = []
     for m in PATH_RE.finditer(path):
@@ -501,7 +501,7 @@ def apply_vx(content, replacements):
     mc = MC.load(content)
     root = mc.root
     for path, text in replacements:
-        node = _resolve_path(root, path)
+        node = resolve_path(root, path)
         if node is None:
             raise ValueError(f"路径无法定位: {path}")
         node = node.at()
@@ -516,3 +516,8 @@ def apply_vx(content, replacements):
             if encoding_name is not None and encoding_name.at().token == b'"':
                 encoding_name.at().data = b"UTF-8"
     return mc.dump()
+
+
+# Compatibility names for trusted adapters using earlier format helpers.
+_me_str = string_value
+_resolve_path = resolve_path

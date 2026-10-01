@@ -20,7 +20,13 @@ CONTROL_TAG_RE = re.compile(
 TOKEN_RE = re.compile(r"\{p(\d+)\}")
 
 
-def protect_tags(text):
+def protect_tags(text, *, syntax=None):
+    if syntax == "renpy":
+        from .formats.renpy import protect_tags as protect_renpy
+        return protect_renpy(text)
+    if syntax == "godot":
+        from .formats.godot import protect_tags as protect_godot
+        return protect_godot(text)
     tokens = []
 
     def replace(match):
@@ -46,6 +52,12 @@ def validate_translation(task, translated, protected=False):
         if Counter(TOKEN_RE.findall(translated)) != expected:
             return "占位符身份或出现次数不匹配"
         translated = restore_tags(translated, task.get("codes", []))
+    if task.get("structure", {}).get("text_syntax") == "renpy":
+        from .formats.renpy import validate_codes
+        return validate_codes(task["text"], translated)
+    if task.get("structure", {}).get("text_syntax") == "godot":
+        from .formats.godot import validate_codes
+        return validate_codes(task["text"], translated)
     expected_tags = CONTROL_TAG_RE.findall(task["text"])
     actual_tags = CONTROL_TAG_RE.findall(translated)
     if Counter(expected_tags) != Counter(actual_tags):

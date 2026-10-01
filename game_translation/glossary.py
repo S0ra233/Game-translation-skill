@@ -85,12 +85,12 @@ def term_error(text, translation, terms):
     return None
 
 
-def initialize(work, tasks):
+def initialize(work, tasks, *, target_locale=None):
     seeds = [t["text"] for t in tasks if t["type"] in ("name", "speaker")]
     candidates = detect_proper_nouns(tasks, seeds)
     defaults = {
         "glossary.md": "# 术语表\n\n| 原文 | 译文 | 说明 | 状态 |\n|---|---|---|---|\n\n状态使用 confirmed 或 pending。候选词不自动视为已确认。\n",
-        "style.md": "# 翻译风格\n\n目标语言：简体中文。对白自然，界面简洁，保留人物语气。\n",
+        "style.md": f"# 翻译风格\n\n目标语言：{target_locale or '简体中文'}。对白自然，界面简洁，保留人物语气。\n",
     }
     for name, content in defaults.items():
         if not (work / name).exists():

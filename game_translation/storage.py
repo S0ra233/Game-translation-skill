@@ -21,20 +21,17 @@ def write_file(path, content, binary=False):
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     options = {} if binary else {"encoding": "utf-8", "newline": ""}
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="wb" if binary else "w", dir=path.parent,
-            prefix="." + path.name + ".", delete=False, **options
-        ) as handle:
-            temporary = Path(handle.name)
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        if temporary is not None and temporary.exists():
-            temporary.unlink()
+    # A failed write/replace retains its temporary file for inspection. Normal
+    # replacement still publishes only a completely flushed file.
+    with tempfile.NamedTemporaryFile(
+        mode="wb" if binary else "w", dir=path.parent,
+        prefix="." + path.name + ".", delete=False, **options
+    ) as handle:
+        temporary = Path(handle.name)
+        handle.write(content)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
 
 
 def write_json(path, value):
