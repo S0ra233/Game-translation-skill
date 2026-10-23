@@ -2,10 +2,10 @@
 import json
 import os
 from pathlib import Path
-import subprocess
 import tempfile
 
 from ...storage import write_json
+from ...process_control import run_engine_process
 
 
 def executable():
@@ -25,9 +25,8 @@ def session(work, purpose):
 def run(arguments, directory, label):
     log = Path(directory) / (label + ".log")
     with log.open("xb") as output:
-        result = subprocess.run([str(executable()), "--headless", *map(str, arguments)],
-            cwd=directory, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        result = run_engine_process([str(executable()), "--headless", *map(str, arguments)],
+                                    directory, output, engine="godot")
     if result.returncode:
         raise ValueError(f"GDRETools 失败（{result.returncode}）；保留日志: {log}")
 

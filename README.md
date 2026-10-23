@@ -2,248 +2,281 @@
 
 简体中文 | [English](README.en.md)
 
-这是一个面向 AI Agent 的游戏翻译 Skill，将引擎检测、资源提取、上下文组织、译文校验和写回串成一个可重复执行的流程。
+**Game Translation** 是一套专为 AI Agent 协作设计的本地游戏汉化与文本工程工具链。目前已打通 **RPG Maker、WOLF RPG Editor、Unity、Ren’Py、TyranoScript 和 Godot** 六大引擎的提取、候选审查、翻译校验与独立副本写回闭环。
 
-目前是早期的 Skill 版本。核心负责资源处理和项目状态，宿主 Agent 负责翻译与需要判断的部分。后续计划打算在同一套核心上增加桌面界面、译文可视化和语料检索。
+在分工上，本项目采用 **「确定性核心（Core）+ 智能宿主（Agent）」** 的协作模式：
 
-## 工作流程
+* **Core（底层核心）**：负责二进制解包与资产定位、统一管理翻译状态（Entry / Task / Scene）、严格校验占位符与术语，并在独立暂存区安全写回、逐条读回核验（Verify）。
 
-```text
-游戏目录
-  → detect 检测引擎
-  → 对应引擎模块解包、提取文本
-  → 核心建立 Entry、Task 和 Scene
-  → 导出统一翻译包
-  → 宿主 Agent 翻译
-  → 核心校验结果、更新任务状态
-  → 对应引擎模块写回新的游戏副本
-  → 重新读取已提取的位置，核对写回内容
+* **Agent（宿主大模型）**：专注于结合上下文的自然语言翻译、从海量候选中筛选有效文本列（Candidates），以及协助排查私有加密外壳（如 MoleBox VFS）、特殊编码或字体缺失等个案问题。
+
+## 核心设计亮点
+
+* **原游戏 100% 只读保护**：
+  原游戏目录全程保持只读，绝不直接修改或污染源文件。构建时先在独立暂存区生成副本，完成写回并通过读回校验后，才原子发布为最终游戏目录（内置 Windows `\\?\` 超长路径支持与文件锁自动退避重试）。若中途失败，系统会保留暂存现场并在 `build_report.json` 中记录阶段信息，方便 Agent 诊断排障。
+
+* **统一的上下文数据模型**：
+  抹平不同引擎的资源差异，统一抽象为三层结构：
+
+  * **Entry（定位坐标）**：记录文本在游戏资产中的精确物理位置，确保写回时严丝合缝。
+
+  * **Task（翻译任务）**：管理单条文本的原文、译文与校验状态；相同文本出现在不同位置时保持独立任务，避免误改上下文。
+
+  * **Scene（语境分组）**：按事件页、脚本标签或数据表组织的有序任务集合，让 Agent 始终在完整剧情语境下翻译，而非盲翻孤立词条。
+
+* **先审查、后提取（Candidates 候选机制）**：
+  面对 Unity、Godot 或 WOLF 中动辄数万条的代码字面量、多语言数据表和未知字段，支持先运行 `candidates` 导出候选清单，由 Agent 识别并锁定真正的剧情与 UI 字段后再正式建库，避免盲目提取污染上下文或改坏系统常量。
+
+* **写回即核验（100% Read-back Verify）**：
+  每次构建新副本时，核心会自动按原坐标重新反序列化读取已写入的文本，逐字段比对预期值。目前已跨 6 大引擎、20 款真实商业与同人游戏（累计 25 万+ 条目）完成全流程写回与 100% 读回一致性验证。
+
+* **实用的排障诊断工具**：
+  内置 `locate GAME "已知文本"` 快速反查画面台词存放在哪个底层资产，以及 `fonts GAME REPORT.json` 自动扫描游戏内的字体引用清单。
+
+## 支持引擎与能力范围
+
+| 引擎家族 | 已原生支持的提取与写回能力 | 边界情况与 Agent 辅助项 | 
+| ----- | ----- | ----- | 
+| **RPG Maker**  (XP / VX / VX Ace / MV / MZ) | • **MV / MZ**：解析并写回数据库 JSON、系统文本与事件脚本，完整保留控制码。  • **XP / VX / VX Ace**：读写 Ruby Marshal（`.rxdata` / `.rvdata2`）；支持 `Game.rgssad` / `Game.rgss3a` 加密归档全自动解密脱壳，直接生成免加密独立副本。 | 插件内部的私有硬编码文本、动态拼接对白及图片文字需个案适配；输出副本直接使用解包资源运行，无需重新打包加密。 | 
+| **WOLF RPG Editor**  (绿狼引擎) | • 集成 `UberWolfCli` 与 `WolfTL` 后端，后台自动解包 `.wolf` 加密归档。  • 按 `cp932` AST 精确提取剧情对白、说话人与分支选项，写回后自动重构可独立运行的游戏副本。 | 魔改加密变体或图片文字需 Agent 辅助处理；生成中文副本后需在游戏设置或配置中指定中文字体。详见 [WOLF 使用说明](tools/wolf/README.md)。 | 
+| **Unity**  (表格 / 序列化资产 / 代码字符串) | • **表格与内嵌文本**：支持 StreamingAssets 及无扩展名 `TextAsset` 的启发式格式识别（JSON / CSV / TSV / TXT / XML），保留原编码与 BOM。  • **序列化资产**：基于 `UnityPy` 读写 `TextAsset`、Localization `StringTable`、TMP 文本组件、Fungus 及 Utage（宴）`AdvImportBook` 剧情书。  • **代码字面量**：支持 IL2CPP `global-metadata.dat`（v29）字符串池重构与 Mono `Assembly-CSharp.dll`（`ldstr` 指令）汇编级改写。  • **资源与字体**：支持 Addressables 本地 Bundle 的 CRC/大小/catalog 同步，以及 `--font-plan` / `--tmp-font` 字体替换。 | 剥离类型树（Stripped TypeTree）的商业游戏需按需安装 `TypeTreeGeneratorAPI`；Addressables 远程包与自定义 Provider 需人工确认；修改代码内嵌字符串时需注意多处逻辑共用同一索引的情况。详见 [Mono 说明](tools/unity_mono/README.md)、[Addressables 说明](tools/unity_addressables/README.md) 与 [字体说明](tools/unity_fonts.md)。 | 
+| **Ren'Py**  (视觉小说引擎) | • 支持松散 `.rpy` 脚本、`.rpa` 归档（`unrpa`）与 `.rpyc` 编译脚本（`unrpyc`）。  • 按官方翻译 ID 与界面词条提取，在输出副本中生成非侵入式的 `game/tl/<language>/` 多语言覆写脚本。 | 深度混淆脚本或运行时动态拼接字符串需 Agent 辅助分析；默认不动原剧本，通过官方多语言层平滑生效。详见 [Ren'Py 使用说明](tools/renpy/README.md)。 | 
+| **TyranoScript**  (Web / Electron 视觉小说) | • 支持松散目录或标准 Electron `resources/app.asar` 容器中的 `.ks` 剧本。  • 按脚本标签分组提取对白、说话人及宏参数，写回后重构归档或生成免封包目录并校验字节。 | 复杂 JS 动态逻辑与自定义宏需单独适配；若主程序对 ASAR 带有哈希完整性校验，需配合去除校验或改为松散目录加载。详见 [ASAR 说明](tools/tyrano_asar.md)。 | 
+| **Godot Engine**  (3.x / 4.x 封包与场景) | • 集成 `GDRETools` 读写标准 `.pck` 容器与 EXE 内嵌 GDPC 包，支持 `--godot-exe` 消除多包歧义。  • 支持文本/二进制场景节点属性、PO 文件，以及 `OptimizedTranslation`（`.translation`）编译型二进制语言表的哈希桶定位与 UTF-8 缓冲区无损改写。 | 脚本内动态拼接的未注册字符串需先经 `candidates` 审查；多包挂载优先级或特殊第三方壳需 Agent 辅助研判。详见 [Godot 使用说明](tools/godot/README.md)。 | 
+
+## 快速开始：通过 AI Agent 使用
+
+本项目既可以作为独立 CLI 运行，也内置了标准 Skill 规范，可直接交给支持本地文件读写与命令执行的 Agent（如 Claude Code、Cursor、Windsurf 等）托管执行。
+
+* **完整技能入口**：[skills/game-translation/SKILL.md](skills/game-translation/SKILL.md)（仓库根目录的 `SKILL.md` 为兼容旧版保留的跳转入口）。
+
+* **跨环境部署**：将技能复制到其他宿主环境时，请完整拷贝 `skills/game-translation/` 目录。所有命令均支持直接传入绝对路径（如 `python /源码路径/run.py status /工作目录`），无需切换当前工作目录。
+
+### 常用提示词示例
+
+**1. 完整汉化流程**
+
+> 请先阅读 `<项目目录>/skills/game-translation/SKILL.md`，按照其中的规范帮我汉化这款游戏。
+>
+> * 原游戏目录：`D:\Games\ExampleGame`
+>
+> * 工作目录：`D:\TranslationWork\ExampleGame`
+>
+> * 输出目录：`D:\TranslatedGames\ExampleGame`
+>
+> * 目标语言：简体中文
+
+**2. 局部排查或单条重翻（Agent 会严格按指定范围执行，不会擅自重跑全流程）**
+
+> 游戏里有一句台词“出発の準備はできた？”没翻译出来，请用 `locate` 帮我查一下它在哪个资源文件里，并看看是不是漏提取的候选字段。
+
+## 环境准备与可选依赖
+
+**核心工作流仅需 Python 3.10+ 标准库**，无需配置任何大模型 API Key（翻译能力由宿主 Agent 直接提供）。如果只处理 RPG Maker（全系列）、明文 Ren'Py、基础 TyranoScript 或通用明文表格，克隆仓库后即可直接运行：
+
 ```
-
-- **Entry**：一处文本在游戏资源中的位置，用来准确写回。
-- **Task**：这一处文本的原文、译文和处理状态。同一句话出现在不同位置时，保留独立任务。
-- **Scene**：由引擎模块提供的上下文分组，保存有序的任务 ID。它可能是事件页、脚本标签或文本表，不一定对应完整的剧情场景。
-
-翻译包用 `target_ids` 指定本次需要翻译的任务，用 `scene_context` 提供文本和上下文，避免重复放入同一处文本。
-
-## 当前支持范围
-
-| 引擎或资源 | 已实现的处理方式 | 主要边界 |
-|---|---|---|
-| RPG Maker MV / MZ | 提取已适配的数据库字段、系统文本和事件文本；按 JSON 路径写回 | 插件脚本、自定义字段和图片中的文字需要另行适配 |
-| RPG Maker XP / VX / VX Ace | 提取和写回已适配的 Ruby Marshal 数据；支持 RGSS v1 / v3 归档读取 | 并非所有事件命令和自定义数据都已覆盖；输出使用解包资源，不重新加密归档 |
-| TyranoScript | 提取 `.ks` 中已适配的对白、说话人及 `text` 参数；按脚本标签分组 | 执行脚本、命令简写、动态文本等不属于通用文本提取范围 |
-| Unity 明文资源 | 处理 StreamingAssets 中可识别的 JSON、CSV、TSV、TXT | 通用字段规则不保证适合每款游戏；分组不代表剧情顺序 |
-| Unity 序列化资产 | 使用 UnityPy 处理可读取的 TextAsset 和符合已适配结构的字符串表 | 私有格式、加密资源及不匹配的数据结构需要单独适配 |
-
-后续会加入其他引擎的适配
-
-## 环境与依赖
-
-基础流程只使用 Python 标准库，不需要配置模型 API Key，也不内置模型调用客户端。模型由使用这个 Skill 的宿主 Agent 提供。
-
-- 代码目标环境：Python 3.10 及以上。
-- 当前自动化样例已在 Windows、Python 3.14.6 下通过；最低版本和其他系统尚未完成兼容性验证。
-- Unity 序列化资产处理额外需要 **UnityPy**。只处理 RPG Maker、Tyrano 或 Unity 明文表格时，无需安装它。
-
-下载项目后，在项目根目录运行：
-
-```powershell
 python --version
 python run.py --help
+
 ```
 
-需要 UnityPy 时，建议使用独立虚拟环境安装：
+### 按需安装的扩展组件
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install UnityPy
-.\.venv\Scripts\python.exe run.py --help
+当需要处理 Unity 序列化资产、加密封包或二进制编译脚本时，可按需配置以下扩展工具（未安装时仅在对应引擎下给出友好提示，不影响其他功能）：
+
+| 适用引擎 | 依赖或工具 | 用途与配置方式 | 
+| ----- | ----- | ----- | 
+| **Unity** | `UnityPy` (pip) | 读写 Unity 序列化资产（`TextAsset`、`StringTable` 等）。建议使用虚拟环境安装：`pip install UnityPy`。 | 
+| **Unity** | `TypeTreeGeneratorAPI` (pip) | 解析剥离了类型树（Stripped TypeTree）的商业游戏资产结构：`pip install TypeTreeGeneratorAPI`。 | 
+| **Unity** | `UnityMono.exe` (dnlib) | 修改 Mono 架构 `Assembly-CSharp.dll` 中的 `ldstr` 字符串指令。详见 [tools/unity_mono/](tools/unity_mono/README.md)。 | 
+| **Unity** | Addressables 辅助工具 | 同步本地 Bundle 的 CRC、大小与 catalog 缓存标识。详见 [tools/unity_addressables/](tools/unity_addressables/README.md)。 | 
+| **Godot** | `gdre_tools.exe` (GDRETools) | 解包与重构 `.pck` 容器、转换二进制场景。配置环境变量 `$env:GAME_TRANSLATION_GDRE` 或放入 `tools/godot/bin/`。详见 [Godot 说明](tools/godot/README.md)。 | 
+| **WOLF** | `UberWolfCli.exe` & `WolfTL` | 解密 `.wolf` 归档并导出/修补 AST。放入 `tools/wolf/bin/` 或加入系统 `PATH`。详见 [WOLF 说明](tools/wolf/README.md)。 | 
+| **Ren'Py** | `unrpa` & `unrpyc` | 解包 `.rpa` 归档与反编译 `.rpyc` 脚本。可通过 pip 安装或参考 [Ren'Py 说明](tools/renpy/README.md)。 | 
+| **Tyrano** | Node.js `asar` / 内置解析 | 读取与重构 Electron `app.asar` 归档。详见 [ASAR 说明](tools/tyrano_asar.md)。 | 
+
+## 手动命令行全流程指南
+
+整体数据流遵循以下标准闭环：
+
+```
+原游戏目录 (只读)
+  ├─ 1. detect / candidates ──→ 识别引擎与审查可疑候选字段
+  ├─ 2. prepare             ──→ 解包提取文本，建立 Entry / Task / Scene 与术语候选
+  ├─ 3. package             ──→ 按 Scene 导出待翻译 JSON 包
+  ├─ 4. 宿主 Agent 翻译      ──→ 结合上下文、术语表与风格指南生成译文
+  ├─ 5. apply               ──→ 校验占位符与格式，更新任务状态
+  └─ 6. build & verify      ──→ 在独立副本写回译文，并逐条重读核验 100% 一致性
+
 ```
 
-后面的示例使用 `python`；如果使用上面的虚拟环境，将它替换为 `.\.venv\Scripts\python.exe`。目前的 Unity 二进制资产测试使用模拟对象，尚不能据此给出真实游戏与 UnityPy 版本的兼容保证。
+> **路径安全要求**：原游戏目录、工作目录（`WORK`）、输出目录（`OUTPUT`）三者必须完全独立，不可重合或互相嵌套。
 
-## 通过 Agent 使用
+### 第一步：检测引擎与提取文本 (`detect` / `prepare`)
 
-把项目目录交给能够读取本地文件、执行 Python 命令的 Agent，并让它先阅读 [SKILL.md](SKILL.md)。整个目录都需要保留。
-
-例如：
-
-> 请先阅读 `<项目目录>/SKILL.md`，按其中的流程处理游戏。原游戏目录是 `D:\Games\ExampleGame`，工作目录是 `D:\TranslationWork\ExampleGame`，输出目录是 `D:\TranslatedGames\ExampleGame`。目标语言为简体中文。
-
-
-
-## 手动了解完整流程
-
-下面的游戏名和路径均为示例，请替换为实际路径。原游戏、工作目录、输出目录必须互相独立，不能重合或嵌套；工作数据和游戏副本建议放在项目目录之外。
-
-### 1. 检测并提取
-
-```powershell
+```
 python run.py detect "D:\Games\ExampleGame"
 python run.py prepare "D:\Games\ExampleGame" "D:\TranslationWork\ExampleGame"
+
 ```
 
-首次使用请选择空的工作目录。`prepare` 会按需解包并生成：
+首次运行请指定一个空的工作目录。`prepare` 完成后会在工作目录下生成以下工程文件：
 
-| 文件 | 用途 |
-|---|---|
-| `project.json` | 引擎信息、Scene 分组、源资源哈希和项目身份 |
-| `entries.json` | 原文在资源中的定位索引 |
-| `tasks.jsonl` | 每个任务的原文、译文和状态 |
-| `proper_nouns.md` | 自动提取的术语候选，重新提取时会更新 |
-| `glossary.md` | 人工确认的术语映射及待确认术语 |
-| `style.md` | 目标语言、人物语气和其他翻译要求 |
+| 文件名 | 说明 | 
+| ----- | ----- | 
+| `project.json` | 记录引擎信息、Scene 分组结构、源文件哈希与工程版本（当前为 v3） | 
+| `entries.json` | 每处文本在原始游戏资产中的精确定位索引 | 
+| `tasks.jsonl` | 所有翻译任务的原文、译文及当前状态 | 
+| `proper_nouns.md` | 自动扫描提取的高频专有名词候选（重新提取时会自动更新） | 
+| `glossary.md` | 供人工与 Agent 维护的正式术语表 | 
+| `style.md` | 目标语言、角色人称语气及排版风格约定 | 
 
-先查看术语候选，再把确定的映射填入 `glossary.md`。术语表使用如下格式：
+在开始大批量翻译前，建议先查看 `proper_nouns.md`，将确认的译名填入 `glossary.md`：
 
-```markdown
+```
 | 原文 | 译文 | 说明 | 状态 |
 |---|---|---|---|
 | Alice | 爱丽丝 | 主角 | confirmed |
-| Silver Order | | 组织名，待确认 | pending |
+| Silver Order | | 组织名，待结合剧情确认 | pending |
+
 ```
 
-上面的词条仅用于说明格式，请按实际游戏填写。需要其他目标语言或翻译风格时，可以修改 `style.md`。
+### 第二步：导出翻译包 (`package`)
 
-### 2. 导出翻译包
-
-```powershell
+```
 python run.py status "D:\TranslationWork\ExampleGame"
 python run.py package "D:\TranslationWork\ExampleGame"
+
 ```
 
-默认导出下一个有待翻译任务的 Scene。命令返回 JSON，并把包保存到工作目录的 `packages/` 中。
+默认按顺序导出下一个包含未完成任务的 Scene，并保存在工作目录的 `packages/` 下（单包默认上限 `60,000` 字符，可通过 `--max-chars` 调整）。
 
-将完整翻译包交给 Agent。Agent 按 `target_ids` 从 `scene_context` 找到目标文本，参考术语和风格，返回 UTF-8 JSON 数组：
+翻译包结构清晰区分了**待翻译目标**与**上下文参考**：
 
-```json
+* `target_ids`：本次真正需要提交译文的任务 ID 列表。
+
+* `scene_context`：提供该场景的前后文台词，帮助 Agent 把握对话语境，同时避免重复翻译相同句子。
+
+Agent 完成翻译后，只需生成如下格式的 UTF-8 JSON 数组文件（例如 `results.json`）：
+
+```
 [
   {
-    "id": "从 target_ids 复制的实际任务 ID",
-    "translation": "对应的译文",
+    "id": "从 target_ids 复制的任务 ID",
+    "translation": "对应的中文译文",
     "uncertain": false
   }
 ]
+
 ```
 
-每项只包含这三个字段。原文中的 `{p0}`、`{p1}` 等占位符必须按规则保留；名称或语义无法确定时，设置 `uncertain: true`。
+> **校验规则**：原文中的 `{p0}`、`{p1}` 等控制码占位符必须原样保留；若遇到语境不明或人名存疑的句子，可将 `uncertain` 设为 `true`，交由后续审校处理。
 
-### 3. 提交结果并处理待审核任务
+### 第三步：提交译文与状态流转 (`apply`)
 
-假设结果保存为工作目录中的 `results.json`：
-
-```powershell
-python run.py apply "D:\TranslationWork\ExampleGame" "实际翻译包ID" "D:\TranslationWork\ExampleGame\results.json"
+```
+python run.py apply "D:\TranslationWork\ExampleGame" "翻译包ID" "D:\TranslationWork\ExampleGame\results.json"
 python run.py status "D:\TranslationWork\ExampleGame"
+
 ```
 
-任务状态由核心校验决定：
+提交后，Core 会自动检查占位符、控制码与术语一致性，并将每条任务更新为以下状态之一：
 
-| 状态 | 含义 |
-|---|---|
-| `NONE` | 尚未处理 |
-| `PROCESSED` | 通过当前规则校验，且没有被译者标记为不确定；不等同于人工逐条审校 |
-| `NEEDS_HUMAN` | 控制码、术语或其他校验有问题，或译者标记了不确定 |
-| `ERROR` | 当前提交结果缺少目标任务等处理错误 |
+* **`NONE`**：尚未翻译。
 
-继续导出、翻译和提交，直到完成需要处理的 Scene。待审核任务可用 `package WORK --include-review` 导出；也可以按下一节的方式指定单条重翻。
+* **`PROCESSED`**：已通过规则校验且未标记 `uncertain`（代表工程校验通过，不等同于人工润色完毕）。
 
-### 4. 写回新副本
+* **`NEEDS_HUMAN`**：占位符/术语校验未通过，或被 Agent 标记为 `uncertain: true`，需复核。
 
-```powershell
+* **`ERROR`**：提交结果缺失目标 ID 或格式异常。
+
+若需专门导出 `NEEDS_HUMAN` 状态的词条进行复核，可使用：
+
+```
+python run.py package "D:\TranslationWork\ExampleGame" --include-review
+
+```
+
+### 第四步：构建新游戏副本与读回核验 (`build` / `verify`)
+
+```
 python run.py build "D:\TranslationWork\ExampleGame" "D:\TranslatedGames\ExampleGame"
+
 ```
 
-输出目录必须尚不存在。构建过程先复制到临时目录，写回译文，再按索引重新读取并核对；核验通过后才生成最终输出目录。
+* **默认全量校验**：默认要求所有任务均处于 `PROCESSED` 状态才允许构建。若希望在半成品阶段先行进游戏预览首屏效果，可附带 `--allow-partial` 参数（未完成词条将安全保留原文）。
 
-默认要求所有任务通过校验。确实需要预览部分译文时，可以加 `--allow-partial`，未通过的任务会保留原文。结果记录在工作目录的 `build_report.json` 和 `verify_report.json` 中。
+* **内置读回核验**：`build` 过程已自动包含完整的 `verify` 读回检查，结果保存在工作目录的 `build_report.json` 与 `verify_report.json` 中。若后续手动微调了输出目录的文件，也可单独运行核验：
 
-构建已经包含文本读回检查，无需立即重复运行 `verify`。如果之后人工修改了输出文件，可以重新核对：
-
-```powershell
+```
 python run.py verify "D:\TranslationWork\ExampleGame" "D:\TranslatedGames\ExampleGame"
+
 ```
 
-最后启动游戏检查对白、选项、字体、换行和界面。
+## 进阶操作：单条重翻、增量续译与字体替换
 
-## 重翻、恢复与字体
+### 1. 定向单条重翻
 
-### 单条重翻
+实机测试时发现某句台词不通顺，可直接按任务 ID 导出单条重翻包（默认附带完整 Scene 上下文）：
 
-```powershell
-python run.py package "D:\TranslationWork\ExampleGame" --target "实际任务ID"
+```
+python run.py package "D:\TranslationWork\ExampleGame" --target "任务ID"
+
 ```
 
-默认保留完整 Scene 上下文。长场景或局部重翻可以使用邻近模式：
+若所在 Scene 极长、只需看前后几句语境，可切换为邻近窗口模式：
 
-```powershell
-python run.py package "D:\TranslationWork\ExampleGame" --target "实际任务ID" --context neighbors --window 2
+```
+python run.py package "D:\TranslationWork\ExampleGame" --target "任务ID" --context neighbors --window 2
+
 ```
 
-此时 `scene_context` 只包含目标，`context_before/context_after` 动态提供前后文，不重复存进 Task。涉及整段剧情语义时，优先保留完整 Scene。
+### 2. 增量提取与工程续译
 
-每包默认限制为 60000 字符，可通过 `--max-chars` 调整。
+* **保留已有进度**：对同一工作目录再次运行 `prepare` 时，只要条目定位、原文及场景上下文未发生变动，已有的译文会自动保留；原文发生变动的条目会自动转为 `NEEDS_HUMAN` 待审状态。
 
-### 重新提取和继续工作
+* **并发与版本约定**：多个子 Agent 可以并行翻译不同的翻译包，但对同一工作目录的 `apply` 提交操作应串行执行。当前工程格式为 `v3`、翻译包格式为 `v2`。
 
-- 相同工作目录可以再次 `prepare`。定位、原文和场景上下文未变时保留已有译文；发生变化的已有译文会转为待审核。
-- 任务 ID 基于资源位置。数组插入、行号变化或移动文本后，不能保证身份稳定，也不自动把旧译文搬到新位置。
-- 导出后，如果项目索引、该 Scene 的任务状态或术语/风格发生变化，旧包可能被拒绝，需要重新导出。原游戏文件变化会在构建时检查，应先重新提取。
-- 同一工作目录的修改操作需要串行执行。多 Agent 可以负责翻译，提交和项目更新应由一个调用方协调。
-- 当前项目格式为版本 3，翻译包格式为版本 2。旧版项目需使用独立的新工作目录；版本 1 翻译包需重新导出。
+### 3. 字体扫描与配置
 
-### 字体配置
+* **扫描字体引用**：运行 `python run.py fonts "D:\Games\ExampleGame" "D:\TranslationWork\fonts_report.json"` 可导出游戏内引用的字体资产清单。
 
-MV/MZ 可以使用用户提供的 TTF、OTF、WOFF 或 WOFF2 文件：
+* **RPG Maker MV / MZ**：构建时可通过 `--font "D:\Fonts\MyFont.ttf"` 直接注入 TTF / OTF / WOFF / WOFF2 字体。
 
-```powershell
-python run.py build "D:\TranslationWork\ExampleGame" "D:\TranslatedGames\ExampleGame" --font "D:\Fonts\MyFont.ttf"
+* **Unity**：支持通过 `--font-plan` 按规则替换 TTF/OTF 或 TMP 字体资产，或在配置了 `XUnity.AutoTranslator` 的环境下使用 `--tmp-font` 挂载兼容的 TMP AssetBundle（详见 [Unity 字体说明](tools/unity_fonts.md)）。
+
+> [!IMPORTANT]
+> **关于「100% 读回一致」与「实机显示效果」的说明**：
+> 构建报告中的 `100% 读回核验通过` 代表底层工程写回无字节损坏、无偏移错位；但游戏的实际汉化体验还取决于**主线剧本是否全部纳入候选提取**、**多语言游戏是否覆盖了当前系统生效的语言列**，以及**实机字体是否缺字、对话框是否溢出折行**。完成构建后，请务必启动输出副本进行实机首屏与主线走查。
+
+## 项目结构
+
 ```
-
-Unity 可以使用 `--tmp-font` 指定 TMP 字体 AssetBundle，前提是游戏副本中具备所需的 XUnity.AutoTranslator 环境，且 Bundle 与目标游戏兼容。
-
-XP/VX/VX Ace、Tyrano 的字体暂未提供通用自动配置。未指定字体时保持原配置。当前字体功能只负责了复制和设置。
-
-## 验证与已知限制
-
-在项目根目录运行现有测试：
-
-```powershell
-python -m unittest discover -s tests -v
-```
-
-当前 12 个自动化测试已通过，覆盖 Scene 翻译包提交与写回、单条重翻与过期结果、部分翻译、格式样例和原文件保护等。
-
-测试不调用模型，也不包含商业游戏本体。Unity 二进制资产使用模拟对象；字体样例检查复制和配置，不验证字形渲染。测试数据中的 `translations.json` 是原文到译文的样例映射，供测试使用。
-
-
-
-## 代码结构与后续计划
-
-```text
-run.py                    命令行入口
-SKILL.md                  给 Agent 的执行说明
+run.py                    CLI 命令行统一入口
+SKILL.md                  根目录兼容入口（实际跳转至 skills/game-translation/SKILL.md）
+skills/game-translation/  完整 Agent 技能定义与各引擎/宿主参考文档
 game_translation/
-  project.py              Entry、Task、Scene 和项目状态
-  translation.py          翻译包导出、结果校验与提交
-  build.py                副本构建与文本读回核验
-  glossary.py              术语候选、术语表和风格
-  text.py / storage.py    控制码处理、文件存储与路径检查
-  engines/                各引擎的检测、提取、写回和字体配置
-  formats/                通用表格、Marshal、RGSS 格式处理
-tests/                    自编样例和最小回归验证
+  project.py              Entry、Task、Scene 数据模型与工程状态管理
+  engines/build_steps.py  跨引擎构建生命周期钩子调度
+  translation.py          翻译包导出、占位符/术语校验与结果提交
+  build.py                安全暂存副本构建、长路径兼容与读回核验
+  glossary.py             高频专有名词提取、术语表与风格配置
+  text.py / storage.py    控制码保护、原子文件读写与路径安全检查
+  engines/                六大引擎的检测、候选扫描、提取、写回与字体适配器
+  formats/                通用表格、Ruby Marshal、RGSS 归档与 WOLF AST 解析
+tools/                    Unity Mono、Addressables、WOLF、Godot、Ren'Py 等辅助工具链说明
+tests/                    单元测试样例与回归验证套件
+
 ```
 
-想了解实现，可以先读 `project.py`，再看 `translation.py` 和 `build.py`，最后选择一个引擎模块深入。核心通过 `game_translation/__init__.py` 导出同步 Python 接口。
+如果想阅读源码或扩展新引擎，建议从 `project.py` 入手了解核心数据结构，接着阅读 `translation.py` 与 `build.py`（含 `engines/build_steps.py` 钩子分发），最后参考 `engines/` 下的具体引擎适配器。核心功能同时通过 `game_translation/__init__.py` 暴露同步 Python API。
 
-后续方向包括译文可视化与审核、由主 Agent 协调不同翻译模型或子代理、术语和语料检索，以及针对真实游戏补充适配。
+## 开源许可与致谢
 
+本项目基于 [MIT License](LICENSE) 开源。
 
-## 许可证与第三方来源
+* **Ruby Marshal 解析与写回**：`game_translation/formats/marshal.py` 修改自 [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL) 的 `plugins/rm_marshal.py`，包含本项目的适配与修复，并完整保留 [上游 MIT 许可声明](game_translation/formats/RPGMTL-LICENSE.txt)。
 
-本项目使用 [MIT License](LICENSE)。
+* **外部按需依赖**：[UnityPy](https://github.com/K0lb3/UnityPy)、`TypeTreeGeneratorAPI`、[XUnity.AutoTranslator](https://github.com/bbepis/XUnity.AutoTranslator)、[BepInEx](https://github.com/BepInEx/BepInEx)、GDRETools、UberWolfCli / WolfTL 及 `unrpa` / `unrpyc` 等均为外部独立工具或按需安装的软件包，未将其源码打包进本仓库，各自遵循其原始开源许可。Godot 二进制翻译表修改等参考来源详见 [Godot 依赖说明](tools/godot/README.md)。
 
-Ruby Marshal 解析与写回代码基于 [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL) 的 `plugins/rm_marshal.py`，本地文件为 `game_translation/formats/marshal.py`，保留 [上游 MIT 许可文本](game_translation/formats/RPGMTL-LICENSE.txt)。
-
-[UnityPy](https://github.com/K0lb3/UnityPy) 是按需安装的外部依赖，未将其源码打包进本项目；其许可与依赖说明随该软件包提供。字体配置中涉及的 [XUnity.AutoTranslator](https://github.com/bbepis/XUnity.AutoTranslator) 和 [BepInEx](https://github.com/BepInEx/BepInEx) 也未随项目分发。
+* **测试资产与版权声明**：仓库内的 `tests/fixtures/` 均为自编最小测试样例。用户使用本工具处理的游戏本体、字体及其他商业资产均归原著作权人所有。

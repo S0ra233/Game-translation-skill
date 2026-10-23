@@ -19,9 +19,33 @@ __pycache__/
 /.local*/
 /archive/
 
-# Local collaboration instructions and desktop development
+# Local collaboration instructions and private development material
 /AGENTS.md
+/.agents/
+/.codex/
+/agent_console_clean.txt
+# Harness is published separately; keep this repository focused on translation
 /desktop/
+/desktop-extensions/
+/desktop-release/
+/DesktopHarness.exe
+
+# Private runtime databases and credential exports (not source modules)
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
+*.db
+*.db-wal
+*.db-shm
+*.pem
+*.p12
+*.pfx
+
+# Local build logs; release source and build scripts remain public
+/desktop-release/*.log
 
 # Local tool and OS caches
 .ruff_cache/

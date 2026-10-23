@@ -5,11 +5,10 @@ import os
 from pathlib import Path
 import pickle
 import shutil
-import subprocess
-import sys
 import zlib
 
 from ...storage import safe_join, write_json
+from process_support.launcher import worker_command
 
 
 class _IndexReader(pickle.Unpickler):
@@ -69,7 +68,7 @@ def read_compiled(files, directory):
     request, output = directory / "request.json", directory / "compiled.json"
     write_json(request, {"repository": str(repository), "files": files})
     helper = Path(__file__).resolve().parents[3] / "tools/renpy/read_rpyc.py"
-    _run([sys.executable, "-B", str(helper), str(request), str(output)], directory / "read.log")
+    _run(worker_command("renpy-read", ["-B", str(helper)], str(request), str(output)), directory / "read.log")
     return json.loads(output.read_text(encoding="utf-8"))
 
 
@@ -88,9 +87,8 @@ def generate_templates(game, session, language):
 
 
 def _run(command, log):
+    from ...process_control import run_engine_process
     with Path(log).open("xb") as output:
-        result = subprocess.run(command, cwd=Path(log).parent, stdin=subprocess.DEVNULL,
-                                stdout=output, stderr=subprocess.STDOUT,
-                                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        result = run_engine_process(command, Path(log).parent, output, engine="renpy")
     if result.returncode:
         raise ValueError(f"Ren'Py 后端失败（{result.returncode}）；日志保留在 {log}")

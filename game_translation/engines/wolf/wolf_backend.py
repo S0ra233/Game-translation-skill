@@ -1,8 +1,8 @@
 """Optional WolfTL/UberWolf CLI boundary; all generated files are retained."""
 import os
 from pathlib import Path
-import subprocess
 import tempfile
+from ...process_control import run_engine_process
 
 
 TOOLS = {
@@ -32,9 +32,8 @@ def run(kind, arguments, directory, label):
     log = directory / (label + ".log")
     # No shell, in-place mode, auto-update, or game executable invocation.
     with log.open("xb") as output:
-        result = subprocess.run([str(executable(kind)), *map(str, arguments)],
-            cwd=directory, stdin=subprocess.DEVNULL, stdout=output, stderr=subprocess.STDOUT,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        result = run_engine_process([str(executable(kind)), *map(str, arguments)],
+                                    directory, output, engine="wolf")
     if result.returncode:
         raise ValueError(f"{TOOLS[kind][1]} 失败（{result.returncode}）；保留日志: {log}")
 

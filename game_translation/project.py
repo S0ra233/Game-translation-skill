@@ -18,6 +18,7 @@ from .text import protect_tags
 from .prepare_options import resolve_adapter_file, resolve_options
 from .candidates import select_candidates
 from .localization import align_localization, select_missing, select_text_sources
+from .process_control import check_cancelled
 
 SCHEMA_VERSION = 3
 
@@ -65,6 +66,7 @@ def index_entries(entries, family):
 def prepare(game_dir, work_dir, *, source_locale=None, target_locale=None,
             text_locale=None, text_overrides=None, adapter_file=None, candidate_selection=None,
             godot_executable=None):
+    check_cancelled()
     game, work = Path(game_dir).resolve(), Path(work_dir).resolve()
     previous_manifest, previous, adapter_file = _prepare_workspace(game, work, adapter_file)
     options = resolve_options(game, previous_manifest, adapter_file=adapter_file,
@@ -75,7 +77,9 @@ def prepare(game_dir, work_dir, *, source_locale=None, target_locale=None,
     if options.candidates and info["family"] not in ("unity", "wolf", "godot"):
         raise ValueError("候选选择目前只支持 Unity、WOLF 和 Godot")
     resources = engine.prepare(info, work)
+    check_cancelled()
     result, extraction, localization = _extract_entries(engine, info, resources, options)
+    check_cancelled()
     entries, warnings = result.entries, result.warnings
     if extraction["resources"] or options.text_selection:
         write_json(work / "extraction_report.json", extraction)
@@ -85,6 +89,8 @@ def prepare(game_dir, work_dir, *, source_locale=None, target_locale=None,
     tasks, scenes = index_entries(entries, info["family"])
     _restore_task_state(tasks, previous)
     manifest = _prepare_manifest(game, info, resources, result, scenes, previous_manifest, options)
+    # 发布项目索引前再检查停止；已经产生的解包文件不删除。
+    check_cancelled()
     _save_prepared_project(work, manifest, entries, tasks, previous, localization)
     return _status_summary(manifest, entries, tasks)
 

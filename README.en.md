@@ -2,246 +2,253 @@
 
 [简体中文](README.md) | English
 
-A game translation Skill for AI agents that connects engine detection, resource extraction, context organization, translation validation, and writing translations back into a repeatable workflow.
+**Game Translation** is a local game localization and text engineering toolchain designed for collaboration with AI agents. It provides an end-to-end workflow for extraction, candidate review, translation validation, and writeback to a standalone copy across **RPG Maker, WOLF RPG Editor, Unity, Ren'Py, TyranoScript, and Godot**.
 
-This is an early Skill version. The core handles resources and project state, while the host agent handles translation and decisions that require judgment. Future plans include a desktop interface, visual translation editing, and corpus retrieval built on the same core.
+The project follows a **deterministic Core + intelligent host Agent** model:
 
-## Workflow
+- **Core**: Unpacks binary resources, locates assets, manages translation state through Entry / Task / Scene, validates placeholders and terminology, and writes translations safely in a separate staging area before verifying them through readback.
+- **Agent**: Handles natural-language translation in context, selects relevant text fields from large candidate sets, and helps investigate game-specific issues such as proprietary wrappers or encryption (for example, MoleBox VFS), unusual encodings, or missing fonts.
 
-```text
-Game directory
-  → detect identifies the engine
-  → The engine adapter unpacks resources and extracts text
-  → The core creates Entries, Tasks, and Scenes
-  → Export a translation package in a shared format
-  → The host agent translates the text
-  → The core validates results and updates task states
-  → The engine adapter writes translations into a new game copy
-  → Read the extracted locations again and check the written text
-```
+## Design Highlights
 
-- **Entry**: The location of a text occurrence in the game resources, used to write translations back accurately.
-- **Task**: The source text, translation, and processing state for that occurrence. Identical text at different locations remains separate tasks.
-- **Scene**: A context group supplied by an engine adapter, containing ordered task IDs. It may represent an event page, a script label, or a text table—not necessarily a complete narrative scene.
+- **Read-only protection for the original game**:
+  The original game directory remains read-only throughout the workflow. Source files are never modified directly. A build first creates a copy in a separate staging area, writes the translations, verifies the result through readback, and only then publishes the final output directory atomically. Windows `\\?\` extended-length paths and automatic backoff retries for file locks are supported. If a build fails, the staging files are retained and the failed stage is recorded in `build_report.json` for diagnosis.
 
-Translation packages use `target_ids` to specify the tasks to translate and `scene_context` to provide text and context without duplicating the same occurrence.
+- **A unified contextual data model**:
+  Engine-specific resource differences are represented through three shared layers:
 
-## Current Support
+  - **Entry — resource location**: Records the precise location of a text item within a game asset so that writeback targets the correct field.
+  - **Task — translation unit**: Tracks the source text, translation, and validation state of an individual item. Identical text at different locations remains separate to prevent context-dependent translations from affecting the wrong occurrence.
+  - **Scene — context group**: An ordered collection of tasks organized by event page, script label, or data table, allowing the Agent to translate within the available context rather than treating every string in isolation.
 
-| Engine or resource | Implemented handling | Main limitations |
-|---|---|---|
-| RPG Maker MV / MZ | Extract supported database fields, system text, and event text; write translations back by JSON path | Plugin scripts, custom fields, and text in images need additional adapters |
-| RPG Maker XP / VX / VX Ace | Extract and update supported Ruby Marshal data; read RGSS v1 / v3 archives | Not all event commands or custom data are covered; output uses unpacked resources without re-encrypting the archive |
-| TyranoScript | Extract supported dialogue, speaker names, and `text` parameters from `.ks` files; group text by script label | Executable scripts, shorthand commands, and dynamic text are outside the generic extraction scope |
-| Unity plain-text resources | Process recognizable JSON, CSV, TSV, and TXT files in StreamingAssets | Generic field rules may not suit every game; grouping does not imply narrative order |
-| Unity serialized assets | Use UnityPy to process readable TextAssets and string tables matching supported structures | Private formats, encrypted resources, and unsupported data structures need separate adapters |
+- **Review before extraction with Candidates**:
+  Unity, Godot, and WOLF projects can contain tens of thousands of code literals, multilingual table cells, and unidentified fields. Run `candidates` first to export a review list, let the Agent identify actual dialogue and UI fields, and then create the translation project. This helps avoid polluting the context or modifying system constants.
 
-Support for additional engines is planned.
+- **Readback verification after writeback**:
+  Every build deserializes and rereads the written text at its original locations, comparing each field with the expected value. The project reports end-to-end writeback and 100% readback consistency checks across six engine families and 20 commercial and independently developed games, covering more than 250,000 entries.
 
-## Environment and Dependencies
+- **Practical diagnostic tools**:
+  Use `locate GAME "known text"` to find the resource containing an on-screen line, and `fonts GAME REPORT.json` to scan a game's font references.
 
-The basic workflow uses only the Python standard library. It requires no model API key and includes no model API client. The host agent using this Skill provides the model.
+## Supported Engines and Scope
 
-- Target environment: Python 3.10 or later.
-- Automated examples have passed on Windows with Python 3.14.6. Compatibility with the minimum Python version and other operating systems has not yet been verified.
-- Processing Unity serialized assets additionally requires **UnityPy**. It is not needed when working only with RPG Maker, Tyrano, or Unity plain-text tables.
+| Engine family | Supported extraction and writeback capabilities | Edge cases and Agent-assisted work |
+| --- | --- | --- |
+| **RPG Maker** (XP / VX / VX Ace / MV / MZ) | **MV / MZ**: Reads and writes database JSON, system text, and event scripts while preserving control codes.<br>**XP / VX / VX Ace**: Reads and writes Ruby Marshal files (`.rxdata` / `.rvdata2`); decrypts and unpacks `Game.rgssad` / `Game.rgss3a` archives to produce a standalone copy using unpacked resources. | Plugin-specific hardcoded text, dynamically assembled dialogue, and text embedded in images may require individual adapters. The output copy runs from unpacked resources, without requiring encrypted repackaging. |
+| **WOLF RPG Editor** | Uses the `UberWolfCli` and `WolfTL` backends to unpack encrypted `.wolf` archives in the background. Extracts dialogue, speakers, and choices through a `cp932` AST, then reconstructs a standalone game copy after patching. | Custom encryption variants and image text may require Agent assistance. A Chinese-language copy may require a suitable font to be selected in the game settings or configuration. See the [WOLF guide](tools/wolf/README.md). |
+| **Unity** (tables / serialized assets / code strings) | **Tables and embedded text**: Supports StreamingAssets and heuristic format detection for extensionless `TextAsset` resources (JSON / CSV / TSV / TXT / XML), preserving the original encoding and BOM.<br>**Serialized assets**: Uses `UnityPy` to read and write `TextAsset`, Localization `StringTable`, TMP text components, Fungus, and Utage `AdvImportBook` resources.<br>**Code literals**: Reconstructs IL2CPP `global-metadata.dat` v29 string pools and rewrites Mono `ldstr` instructions in `Assembly-CSharp.dll`.<br>**Resources and fonts**: Updates local Addressables bundle CRCs, sizes, and catalogs, with font replacement through `--font-plan` / `--tmp-font`. | Commercial games with stripped type trees may require `TypeTreeGeneratorAPI`. Remote Addressables bundles and custom providers require individual review. When changing code literals, account for multiple code paths sharing the same string index. See the [Mono guide](tools/unity_mono/README.md), [Addressables guide](tools/unity_addressables/README.md), and [font guide](tools/unity_fonts.md). |
+| **Ren'Py** | Supports loose `.rpy` scripts, `.rpa` archives through `unrpa`, and compiled `.rpyc` scripts through `unrpyc`. Extracts official translation IDs and UI strings, then generates non-invasive multilingual overrides under `game/tl/<language>/` in the output copy. | Heavily obfuscated scripts and dynamically assembled strings may need Agent analysis. The original script is left unchanged by default; translations use Ren'Py's multilingual layer. See the [Ren'Py guide](tools/renpy/README.md). |
+| **TyranoScript** (web / Electron visual novels) | Supports `.ks` scripts in loose directories or standard Electron `resources/app.asar` archives. Extracts dialogue, speakers, and macro arguments by script tag, then reconstructs the archive or creates an unpacked directory and verifies the bytes. | Complex dynamic JavaScript and custom macros need separate handling. If the executable enforces ASAR hash integrity, that restriction must be addressed or the application must be configured to load unpacked resources. See the [ASAR guide](tools/tyrano_asar.md). |
+| **Godot Engine** (3.x / 4.x packages and scenes) | Uses `GDRETools` to read and write standard `.pck` containers and GDPC packages embedded in executables; `--godot-exe` resolves ambiguous multi-package projects. Supports text and binary scene properties, PO files, and hash-bucket lookup with lossless UTF-8 buffer rewriting for compiled `OptimizedTranslation` (`.translation`) tables. | Unregistered strings assembled dynamically in scripts should first be reviewed through `candidates`. Package mounting precedence and third-party wrappers may require Agent investigation. See the [Godot guide](tools/godot/README.md). |
 
-After downloading the project, run the following from its root directory:
+## Quick Start: Use Through an AI Agent
+
+The project can run as a standalone CLI or through its Agent Skill. A host that supports local file access and command execution—such as Claude Code, Cursor, or Windsurf—can carry out the workflow.
+
+- **Full Skill entry point**: [skills/game-translation/SKILL.md](skills/game-translation/SKILL.md). The repository-root `SKILL.md` is retained as a compatibility entry pointing to the full Skill.
+- **Cross-host deployment**: Copy the complete `skills/game-translation/` directory when installing the Skill in another host. Commands accept absolute paths, such as `python /path/to/source/run.py status /path/to/work`, so switching the current working directory is not required.
+
+### Example Prompts
+
+**1. Full localization workflow**
+
+> Read `<project-directory>/skills/game-translation/SKILL.md` first, then follow its workflow to localize this game.
+>
+> - Original game: `D:\Games\ExampleGame`
+> - Working directory: `D:\TranslationWork\ExampleGame`
+> - Output directory: `D:\TranslatedGames\ExampleGame`
+> - Target language: Simplified Chinese
+
+**2. Investigate a missing line or retranslate a specific item**
+
+The Agent should stay within the requested scope rather than rerun the entire workflow.
+
+> The line “出発の準備はできた？” is still untranslated in the game. Use `locate` to find its resource, then check whether its field was missed during candidate selection.
+
+## Environment and Optional Dependencies
+
+**The core workflow requires only Python 3.10+ and the standard library.** No model API key is required by the Core; translation is provided by the host Agent. For RPG Maker, plaintext Ren'Py scripts, basic TyranoScript, or ordinary plaintext tables, you can start directly after cloning the repository:
 
 ```powershell
 python --version
 python run.py --help
 ```
 
-If you need UnityPy, installing it in a separate virtual environment is recommended:
+### Optional Components
 
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install UnityPy
-.\.venv\Scripts\python.exe run.py --help
+Unity serialized assets, encrypted packages, and compiled binary scripts may require additional tools. Missing optional dependencies are reported for the relevant engine without preventing unrelated workflows from running.
+
+| Engine | Dependency or tool | Purpose and setup |
+| --- | --- | --- |
+| **Unity** | `UnityPy` (pip) | Reads and writes Unity serialized assets such as `TextAsset` and `StringTable`. Install in a virtual environment: `pip install UnityPy`. |
+| **Unity** | `TypeTreeGeneratorAPI` (pip) | Reconstructs asset structures for commercial games with stripped type trees: `pip install TypeTreeGeneratorAPI`. |
+| **Unity** | `UnityMono.exe` (dnlib) | Rewrites Mono `ldstr` string instructions in `Assembly-CSharp.dll`. See [tools/unity_mono/](tools/unity_mono/README.md). |
+| **Unity** | Addressables helper | Updates local bundle CRCs, sizes, and catalog cache identifiers. See [tools/unity_addressables/](tools/unity_addressables/README.md). |
+| **Godot** | `gdre_tools.exe` (GDRETools) | Unpacks and rebuilds `.pck` containers and converts binary scenes. Configure `$env:GAME_TRANSLATION_GDRE` or place it in `tools/godot/bin/`. See the [Godot guide](tools/godot/README.md). |
+| **WOLF** | `UberWolfCli.exe` and `WolfTL` | Decrypts `.wolf` archives and exports/patches the AST. Place the tools in `tools/wolf/bin/` or add them to `PATH`. See the [WOLF guide](tools/wolf/README.md). |
+| **Ren'Py** | `unrpa` and `unrpyc` | Unpacks `.rpa` archives and decompiles `.rpyc` scripts. Install the appropriate packages or follow the [Ren'Py guide](tools/renpy/README.md). |
+| **Tyrano** | Node.js `asar` / built-in parser | Reads and rebuilds Electron `app.asar` archives. See the [ASAR guide](tools/tyrano_asar.md). |
+
+## Full CLI Workflow
+
+```text
+Original game (read-only)
+  ├─ 1. detect / candidates → Detect the engine and review uncertain candidate fields
+  ├─ 2. prepare             → Extract text; create Entry / Task / Scene and terminology candidates
+  ├─ 3. package             → Export a Scene-based JSON translation package
+  ├─ 4. Host Agent          → Translate using context, terminology, and style guidance
+  ├─ 5. apply               → Validate placeholders and structure; update task states
+  └─ 6. build & verify      → Write to a separate copy and verify by rereading each field
 ```
 
-The examples below use `python`. If you use the virtual environment above, replace it with `.\.venv\Scripts\python.exe`. Current Unity binary asset tests use mock objects, so they do not establish compatibility between real games and UnityPy versions.
+> **Path requirements**: The original game directory, working directory (`WORK`), and output directory (`OUTPUT`) must be separate. They must not overlap or be nested inside one another.
 
-## Using the Skill with an Agent
-
-Give the project directory to an agent that can read local files and run Python commands, and ask it to read [SKILL.md](SKILL.md) first. Keep the entire directory together.
-
-For example:
-
-> Read `<project-directory>/SKILL.md` first and follow its workflow. The original game is in `D:\Games\ExampleGame`, the working directory is `D:\TranslationWork\ExampleGame`, and the output directory is `D:\TranslatedGames\ExampleGame`. Translate into Simplified Chinese.
-
-## Walking Through the Full Workflow
-
-The game names and paths below are examples; replace them with your actual paths. The original game, working directory, and output directory must be separate: they cannot overlap or be nested within one another. Keep working data and game copies outside the project directory when possible.
-
-### 1. Detect and Extract
+### Step 1: Detect the Engine and Extract Text (`detect` / `prepare`)
 
 ```powershell
 python run.py detect "D:\Games\ExampleGame"
 python run.py prepare "D:\Games\ExampleGame" "D:\TranslationWork\ExampleGame"
 ```
 
-Choose an empty working directory for the first run. `prepare` unpacks resources when needed and generates:
+Use an empty working directory for the first run. `prepare` creates these project files:
 
 | File | Purpose |
-|---|---|
-| `project.json` | Engine information, Scene groups, source resource hashes, and project identity |
-| `entries.json` | An index of source text locations in the resources |
-| `tasks.jsonl` | Source text, translation, and state for each task |
-| `proper_nouns.md` | Automatically extracted terminology candidates, refreshed on re-extraction |
-| `glossary.md` | Confirmed term mappings and terms awaiting confirmation |
-| `style.md` | Target language, character voice, and other translation requirements |
+| --- | --- |
+| `project.json` | Engine details, Scene groups, source hashes, and project format version (currently v3). |
+| `entries.json` | Exact locations of text within the original game resources. |
+| `tasks.jsonl` | Source text, translations, and current states for all translation tasks. |
+| `proper_nouns.md` | Automatically detected high-frequency proper-name candidates; updated on re-extraction. |
+| `glossary.md` | The formal glossary maintained by the user and Agent. |
+| `style.md` | Target language, character voice, forms of address, and formatting conventions. |
 
-Review the terminology candidates, then add confirmed mappings to `glossary.md`. Use this table format:
+Before translating in bulk, review `proper_nouns.md` and add confirmed translations to `glossary.md`:
 
 ```markdown
 | Source | Translation | Notes | Status |
 |---|---|---|---|
 | Alice | 爱丽丝 | Protagonist | confirmed |
-| Silver Order | | Organization name, awaiting confirmation | pending |
+| Silver Order | | Organization; needs story context | pending |
 ```
 
-These entries only illustrate the format; use terms from your actual game. To change the target language or translation style, edit `style.md`.
-
-### 2. Export a Translation Package
+### Step 2: Export a Translation Package (`package`)
 
 ```powershell
 python run.py status "D:\TranslationWork\ExampleGame"
 python run.py package "D:\TranslationWork\ExampleGame"
 ```
 
-By default, this exports the next Scene with tasks awaiting translation. The command returns JSON and saves the package under `packages/` in the working directory.
+By default, the next Scene containing unfinished tasks is exported in order and saved under the working directory's `packages/` folder. The default package limit is `60,000` characters, configurable through `--max-chars`.
 
-Give the complete package to the agent. It uses `target_ids` to find target text in `scene_context`, follows the glossary and style, and returns a UTF-8 JSON array:
+The package distinguishes **translation targets** from **context references**:
+
+- `target_ids`: IDs of the tasks whose translations must be submitted.
+- `scene_context`: Contextual dialogue for understanding the Scene without submitting those reference items again.
+
+The Agent produces a UTF-8 JSON array, for example in `results.json`:
 
 ```json
 [
   {
-    "id": "actual task ID copied from target_ids",
-    "translation": "the corresponding translation",
+    "id": "task ID copied from target_ids",
+    "translation": "对应的中文译文",
     "uncertain": false
   }
 ]
 ```
 
-Each item contains only these three fields. Preserve source placeholders such as `{p0}` and `{p1}` according to the package rules. Set `uncertain: true` when a name or meaning is unclear.
+> **Validation rules**: Preserve protected control-code placeholders such as `{p0}` and `{p1}` exactly. Set `uncertain` to `true` when meaning or a character name requires review.
 
-### 3. Submit Results and Resolve Tasks Needing Review
-
-Assuming the results are saved as `results.json` in the working directory:
+### Step 3: Submit Translations and Update Task States (`apply`)
 
 ```powershell
-python run.py apply "D:\TranslationWork\ExampleGame" "actual-package-ID" "D:\TranslationWork\ExampleGame\results.json"
+python run.py apply "D:\TranslationWork\ExampleGame" "package-ID" "D:\TranslationWork\ExampleGame\results.json"
 python run.py status "D:\TranslationWork\ExampleGame"
 ```
 
-The core determines task states through validation:
+The Core checks placeholders, control codes, and terminology consistency, then assigns each task one of these states:
 
-| State | Meaning |
-|---|---|
-| `NONE` | Not yet processed |
-| `PROCESSED` | Passed the current validation rules and was not marked uncertain by the translator; this does not mean it has received individual human review |
-| `NEEDS_HUMAN` | A control-code, terminology, or other validation issue was found, or the translator marked the result uncertain |
-| `ERROR` | A processing error, such as a target task missing from the submitted results |
+- **`NONE`**: Not translated yet.
+- **`PROCESSED`**: Passed the configured checks and is not marked `uncertain`. This means engineering validation passed, not that human editing is complete.
+- **`NEEDS_HUMAN`**: Placeholder or terminology checks failed, or the Agent marked the item `uncertain: true`.
+- **`ERROR`**: A target ID is missing from the submitted result or the result has an invalid format.
 
-Continue exporting, translating, and submitting until the required Scenes are complete. Use `package WORK --include-review` to include tasks needing review, or select a single task for retranslation as shown below.
+To export items marked `NEEDS_HUMAN` for review:
 
-### 4. Build a New Game Copy
+```powershell
+python run.py package "D:\TranslationWork\ExampleGame" --include-review
+```
+
+### Step 4: Build a New Game Copy and Verify Readback (`build` / `verify`)
 
 ```powershell
 python run.py build "D:\TranslationWork\ExampleGame" "D:\TranslatedGames\ExampleGame"
 ```
 
-The output directory must not already exist. The build first copies the game into a temporary directory, writes translations, and reads the indexed locations again to verify the result. It creates the final output directory only after these checks pass.
-
-By default, all tasks must pass validation. To preview a partial translation, add `--allow-partial`; tasks that have not passed retain their original text. Results are recorded in `build_report.json` and `verify_report.json` in the working directory.
-
-The build already includes text readback checks, so there is no need to run `verify` immediately afterward. If you later edit output files manually, you can check them again:
+- **Complete validation by default**: All tasks must be `PROCESSED` before a normal build. To preview a partially translated copy, add `--allow-partial`; unfinished items retain their source text.
+- **Built-in readback verification**: `build` includes the readback checks and saves `build_report.json` and `verify_report.json` in the working directory. You can also run verification separately after editing output files manually:
 
 ```powershell
 python run.py verify "D:\TranslationWork\ExampleGame" "D:\TranslatedGames\ExampleGame"
 ```
 
-Finally, launch the game and check dialogue, choices, fonts, line wrapping, and the interface.
+## Advanced Workflows: Retranslation, Incremental Progress, and Fonts
 
-## Retranslation, Resuming Work, and Fonts
+### 1. Retranslate a Specific Item
 
-### Retranslating a Single Task
-
-```powershell
-python run.py package "D:\TranslationWork\ExampleGame" --target "actual-task-ID"
-```
-
-This keeps the full Scene context by default. For a long Scene or a local retranslation, you can use neighboring context:
+If a line reads awkwardly during gameplay, export a package for that task ID. Full Scene context is included by default:
 
 ```powershell
-python run.py package "D:\TranslationWork\ExampleGame" --target "actual-task-ID" --context neighbors --window 2
+python run.py package "D:\TranslationWork\ExampleGame" --target "task-ID"
 ```
 
-In this mode, `scene_context` contains only the target. `context_before/context_after` provide neighboring text dynamically, without duplicating it in the Task. Prefer the full Scene when understanding the whole passage matters.
-
-Each package has a default limit of 60,000 characters, adjustable with `--max-chars`.
-
-### Re-extracting and Continuing Work
-
-- Run `prepare` again using the same working directory. Existing translations are retained when the location, source text, and Scene context are unchanged. Existing translations affected by changes are marked for review.
-- Task IDs are based on resource locations. Array insertions, line-number changes, or moved text may change task identities; old translations are not automatically transferred to new locations.
-- After export, changes to the project index, task states in that Scene, or glossary/style rules may cause an old package to be rejected. Export a new package in that case. Changes to original game files are checked during the build and should be handled by re-extracting first.
-- Operations that modify the same working directory must run sequentially. Multiple agents may translate, but one caller should coordinate submissions and project updates.
-- The current project format is version 3, and the translation package format is version 2. Older projects require a separate new working directory; version 1 translation packages must be exported again.
-
-### Font Configuration
-
-MV/MZ can use a user-supplied TTF, OTF, WOFF, or WOFF2 file:
+For a very long Scene, request a neighboring context window instead:
 
 ```powershell
-python run.py build "D:\TranslationWork\ExampleGame" "D:\TranslatedGames\ExampleGame" --font "D:\Fonts\MyFont.ttf"
+python run.py package "D:\TranslationWork\ExampleGame" --target "task-ID" --context neighbors --window 2
 ```
 
-For Unity, use `--tmp-font` to specify a TMP font AssetBundle. The game copy must have the required XUnity.AutoTranslator setup, and the Bundle must be compatible with the target game.
+### 2. Incremental Extraction and Continued Translation
 
-Generic automatic font configuration is not yet available for XP/VX/VX Ace or Tyrano. If no font is specified, the original configuration is retained. The current font functionality handles only copying and configuration.
+- **Preserve progress**: Running `prepare` again on the same working directory preserves translations when the item's location, source text, and Scene context remain unchanged. Items with changed source text are marked `NEEDS_HUMAN`.
+- **Concurrency and versions**: Multiple subagents may translate separate packages in parallel, but `apply` operations on the same working directory should run serially. The current project format is `v3`; the translation package format is `v2`.
 
-## Validation and Known Limitations
+### 3. Font Discovery and Configuration
 
-Run the existing tests from the project root:
+- **Scan font references**: Run `python run.py fonts "D:\Games\ExampleGame" "D:\TranslationWork\fonts_report.json"` to export the game's font asset references.
+- **RPG Maker MV / MZ**: Pass `--font "D:\Fonts\MyFont.ttf"` during the build to inject a TTF / OTF / WOFF / WOFF2 font.
+- **Unity**: Use `--font-plan` to replace TTF/OTF or TMP font assets according to a plan, or use `--tmp-font` to mount a compatible TMP AssetBundle in an environment configured with `XUnity.AutoTranslator`. See the [Unity font guide](tools/unity_fonts.md).
 
-```powershell
-python -m unittest discover -s tests -v
-```
+> [!IMPORTANT]
+> **Readback consistency and the in-game experience are different checks.**
+>
+> A report showing 100% readback verification means the targeted writeback checks passed without detected text corruption or incorrect resource offsets. It does not establish that every story resource was extracted, that the active language column of a multilingual game was covered, or that fonts and dialogue layouts render correctly. After building, launch the output copy and inspect the opening screens and main story flow.
 
-The current 12 automated tests have passed. They cover Scene package submission and writeback, single-task retranslation and stale results, partial translation, format samples, and preservation of original files.
-
-Tests do not call models or include commercial game runtimes. Unity binary asset tests use mock objects. Font samples check copying and configuration, not glyph rendering. The test fixture `translations.json` is a source-to-translation mapping used by the tests.
-
-## Code Structure and Future Plans
+## Project Structure
 
 ```text
-run.py                    Command-line entry point
-SKILL.md                  Execution instructions for agents
+run.py                    Unified CLI entry point
+SKILL.md                  Compatibility entry pointing to skills/game-translation/SKILL.md
+skills/game-translation/  Full Agent Skill and engine/host references
 game_translation/
-  project.py              Entries, Tasks, Scenes, and project state
-  translation.py          Package export, result validation, and submission
-  build.py                Game copy construction and text readback checks
-  glossary.py             Term candidates, glossary, and style
-  text.py / storage.py    Control codes, file storage, and path checks
-  engines/                Engine detection, extraction, writeback, and fonts
-  formats/                Shared table, Marshal, and RGSS format handling
-tests/                    Synthetic samples and minimal regression checks
+  project.py              Entry / Task / Scene model and project state
+  translation.py          Package export, placeholder/terminology checks, and result submission
+  build.py                Staged-copy builds, extended paths, and readback verification
+  glossary.py             Proper-name candidates, glossary, and style configuration
+  text.py / storage.py    Control-code protection, atomic I/O, and path checks
+  engines/
+    build_steps.py        Shared build lifecycle hook dispatch
+    ...                   Detection, candidate scans, extraction, writeback, and fonts
+  formats/                Tables, Ruby Marshal, RGSS archives, and WOLF AST parsing
+tools/                    Unity Mono, Addressables, WOLF, Godot, and Ren'Py helper guides
+tests/                    Local unit-test fixtures and regression checks
 ```
 
-To understand the implementation, start with `project.py`, then read `translation.py` and `build.py`, and finally explore an engine adapter. The core exports a synchronous Python API through `game_translation/__init__.py`.
+To understand the code or add an engine, start with `project.py`, then read `translation.py` and `build.py`, followed by `engines/build_steps.py` and the relevant engine adapter. Synchronous Python APIs are exported through `game_translation/__init__.py`.
 
-Future directions include visual translation editing and review, a main agent coordinating translation models or subagents, terminology and corpus retrieval, and additional adapters based on real games.
+## License and Acknowledgments
 
+The project is released under the [MIT License](LICENSE).
 
-
-## License and Third-Party Sources
-
-This project uses the [MIT License](LICENSE).
-
-The Ruby Marshal parser and writer are based on `plugins/rm_marshal.py` from [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL). The local file is `game_translation/formats/marshal.py`, and the [upstream MIT license text](game_translation/formats/RPGMTL-LICENSE.txt) is retained. 
-
-[UnityPy](https://github.com/K0lb3/UnityPy) is an external dependency installed as needed; its source is not bundled here. Its license and dependency notices are provided with that package. [XUnity.AutoTranslator](https://github.com/bbepis/XUnity.AutoTranslator) and [BepInEx](https://github.com/BepInEx/BepInEx), referenced for font configuration, are also not distributed with this project.
-
+- **Ruby Marshal parsing and writeback**: `game_translation/formats/marshal.py` is adapted from `plugins/rm_marshal.py` in [MizaGBF/RPGMTL](https://github.com/MizaGBF/RPGMTL), with project-specific changes and fixes. The [upstream MIT notice](game_translation/formats/RPGMTL-LICENSE.txt) is retained in full.
+- **Optional external dependencies**: [UnityPy](https://github.com/K0lb3/UnityPy), `TypeTreeGeneratorAPI`, [XUnity.AutoTranslator](https://github.com/bbepis/XUnity.AutoTranslator), [BepInEx](https://github.com/BepInEx/BepInEx), GDRETools, UberWolfCli / WolfTL, and `unrpa` / `unrpyc` are independent external tools or optional packages. Their sources are not bundled with this repository, and each retains its own license. References for Godot binary translation-table handling are listed in the [Godot dependency guide](tools/godot/README.md).
+- **Test assets and copyright**: `tests/fixtures/` contains small, self-authored fixtures. Games, fonts, and other commercial assets processed by users remain the property of their respective copyright holders.
